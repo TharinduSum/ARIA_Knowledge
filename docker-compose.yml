@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aria-knowledge-backend
+    restart: always
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./backend/.env
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aria-knowledge-frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend

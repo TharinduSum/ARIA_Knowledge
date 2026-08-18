@@ -1,0 +1,205 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ARIA Knowledge Backend API",
+    "description": "API documentation for the ARIA Knowledge retrieval-augmented generation (RAG) backend. This service handles document processing, chunking, pgvector embedding indexation, and semantic similarity searching.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "ARIA Support"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local server"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Checks if the server is healthy and operational.",
+        "responses": {
+          "200": {
+            "description": "Server is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "healthy"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/upload": {
+      "post": {
+        "summary": "Upload and Process PDF",
+        "description": "Uploads a PDF document, parses its text, splits it into chunks based on the requested size and overlap, embeds each chunk, and indexes it in the pgvector database.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The PDF file to upload and index (Max 50MB)"
+                  },
+                  "chunk_size": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Character size of each document chunk"
+                  },
+                  "chunk_overlap": {
+                    "type": "integer",
+                    "default": 150,
+                    "description": "Character overlap between adjacent chunks"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "File parsed and indexed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "File processed and indexed successfully"
+                    },
+                    "chunks_count": {
+                      "type": "integer",
+                      "example": 45
+                    },
+                    "filename": {
+                      "type": "string",
+                      "example": "retrieval_augmented_generation.pdf"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request: Failed to parse form, or missing file parameter"
+          },
+          "500": {
+            "description": "Internal Server Error: Failed to extract text from PDF or save embeddings to vector database"
+          }
+        }
+      }
+    },
+    "/api/search": {
+      "post": {
+        "summary": "Semantic Search",
+        "description": "Performs a similarity search using pgvector to retrieve document chunks most relevant to the query.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "The query string to embed and search for similarity",
+                    "example": "What is the capital of France?"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "The maximum number of matches to return"
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search successfully completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "query": {
+                      "type": "string",
+                      "example": "What is the capital of France?"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SearchResult"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request: Invalid JSON request payload or missing query"
+          },
+          "500": {
+            "description": "Internal Server Error: Embedding retrieval or database search failed"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Text content of the matching document chunk",
+            "example": "Paris is the capital and most populous city of France..."
+          },
+          "score": {
+            "type": "number",
+            "format": "float",
+            "description": "Similarity score (higher score means more similar)",
+            "example": 0.84231
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Key-value metadata associated with the chunk (e.g. filename, chunk index)",
+            "additionalProperties": true,
+            "example": {
+              "filename": "france.pdf",
+              "loc.page_number": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}
