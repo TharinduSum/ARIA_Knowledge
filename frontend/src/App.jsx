@@ -124,40 +124,66 @@ function App() {
     formData.append('chunk_overlap', chunkOverlap.toString());
 
     try {
-      // Simulate progress up to 60% before server handles ingestion
-      const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev < 60) return prev + 10;
-          clearInterval(progressInterval);
-          return 60;
-        });
-      }, 300);
-
       const response = await fetch(`${API_BASE}/api/upload`, {
         method: 'POST',
         body: formData,
       });
 
-      clearInterval(progressInterval);
-
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(errText || 'Failed to process document');
+        throw new Error(errText || 'Failed to start document upload');
       }
 
-      const result = await response.json();
-      setUploadProgress(100);
-      setUploadStatus('success');
-      setProcessedFile({
-        name: result.filename,
-        chunks: result.chunks_count
-      });
+      const uploadResult = await response.json();
+      const jobId = uploadResult.job_id;
+      const filename = uploadResult.filename;
 
-      // Append to local state list
-      setIndexedFiles(prev => [
-        { name: result.filename, chunks: result.chunks_count, id: Date.now() },
-        ...prev
-      ]);
+      setUploadStatus('processing');
+      setUploadProgress(30);
+
+      // Start polling for job status
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${API_BASE}/api/jobs?id=${jobId}`);
+          if (!statusRes.ok) {
+            clearInterval(pollInterval);
+            throw new Error('Failed to get job status from backend');
+          }
+
+          const job = await statusRes.json();
+
+          if (job.Status === 'completed') {
+            clearInterval(pollInterval);
+            setUploadProgress(100);
+            setUploadStatus('success');
+            setProcessedFile({
+              name: filename,
+              chunks: 'Successfully Processed'
+            });
+
+            // Append to local state list
+            setIndexedFiles(prev => [
+              { name: filename, chunks: 'Async Ingest', id: Date.now() },
+              ...prev
+            ]);
+          } else if (job.Status === 'failed') {
+            clearInterval(pollInterval);
+            setUploadStatus('error');
+            setUploadErrorMsg(job.ErrorMessage || 'Processing failed.');
+          } else {
+            // Still queued or processing - increment progress bar slowly
+            setUploadProgress(prev => {
+              if (prev < 90) return prev + 5;
+              return 90;
+            });
+          }
+        } catch (pollErr) {
+          clearInterval(pollInterval);
+          setUploadStatus('error');
+          setUploadErrorMsg(pollErr.message || 'Error tracking job status.');
+        }
+      }, 2000);
+
     } catch (err) {
       setUploadStatus('error');
       setUploadErrorMsg(err.message || 'An error occurred during upload.');

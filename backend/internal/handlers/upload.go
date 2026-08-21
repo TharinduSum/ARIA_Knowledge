@@ -4,20 +4,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 
-	"github.com/aria-knowledge/backend/internal/service"
+	"github.com/aria-knowledge/backend/internal/ingest"
+	"github.com/google/uuid"
 )
 
 type UploadHandler struct {
-	pdfService    *service.PDFService
-	vectorService *service.VectorService
+	jobService *ingest.JobService
 }
 
-func NewUploadHandler(pdfService *service.PDFService, vectorService *service.VectorService) *UploadHandler {
+func NewUploadHandler(jobService *ingest.JobService) *UploadHandler {
 	return &UploadHandler{
-		pdfService:    pdfService,
-		vectorService: vectorService,
+		jobService: jobService,
 	}
 }
 
@@ -49,45 +47,69 @@ func (h *UploadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Parse settings
-	chunkSizeStr := r.FormValue("chunk_size")
-	chunkOverlapStr := r.FormValue("chunk_overlap")
+	log.Printf("Uploading file: %s (size: %d bytes) for async ingestion", header.Filename, header.Size)
 
-	chunkSize := 1000
-	if val, err := strconv.Atoi(chunkSizeStr); err == nil && val > 0 {
-		chunkSize = val
-	}
-
-	chunkOverlap := 150
-	if val, err := strconv.Atoi(chunkOverlapStr); err == nil && val >= 0 {
-		chunkOverlap = val
-	}
-
-	log.Printf("Uploading file: %s (size: %d bytes), ChunkSize: %d, ChunkOverlap: %d", header.Filename, header.Size, chunkSize, chunkOverlap)
-
-	// Process the PDF into vectorstore documents
-	docs, err := h.pdfService.ProcessPDF(r.Context(), file, header.Size, chunkSize, chunkOverlap, header.Filename)
+	// Create and queue the ingestion job
+	jobID, err := h.jobService.CreateJob(r.Context(), header.Filename, file)
 	if err != nil {
-		log.Printf("Error processing PDF %s: %v", header.Filename, err)
-		http.Error(w, "Error processing PDF: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Index in pgvector
-	err = h.vectorService.AddDocuments(r.Context(), docs)
-	if err != nil {
-		log.Printf("Error adding documents to vector store: %v", err)
-		http.Error(w, "Error saving vectors: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("Error creating ingestion job for %s: %v", header.Filename, err)
+		http.Error(w, "Error queuing PDF: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	response := map[string]any{
-		"status":       "success",
-		"message":      "File processed and indexed successfully",
-		"chunks_count": len(docs),
-		"filename":     header.Filename,
+		"status":   "queued",
+		"message":  "File queued for async ingestion and processing",
+		"job_id":   jobID.String(),
+		"filename": header.Filename,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(response)
+}
+
+type JobsHandler struct {
+	jobService *ingest.JobService
+}
+
+func NewJobsHandler(jobService *ingest.JobService) *JobsHandler {
+	return &JobsHandler{
+		jobService: jobService,
+	}
+}
+
+func (h *JobsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Handle OPTIONS preflight request
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	jobIDStr := r.URL.Query().Get("id")
+	if jobIDStr == "" {
+		http.Error(w, "Missing job id parameter", http.StatusBadRequest)
+		return
+	}
+
+	jobID, err := uuid.Parse(jobIDStr)
+	if err != nil {
+		http.Error(w, "Invalid job id format", http.StatusBadRequest)
+		return
+	}
+
+	job, err := h.jobService.GetJobStatus(r.Context(), jobID)
+	if err != nil {
+		log.Printf("Error retrieving job status for %s: %v", jobID, err)
+		http.Error(w, "Job not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(job)
 }

@@ -8,7 +8,9 @@ import (
 
 	"github.com/aria-knowledge/backend/internal/config"
 	"github.com/aria-knowledge/backend/internal/handlers"
+	"github.com/aria-knowledge/backend/internal/ingest"
 	"github.com/aria-knowledge/backend/internal/service"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -25,9 +27,31 @@ func main() {
 	// Context for initialization
 	ctx := context.Background()
 
-	// Retry connecting to Postgres and Ollama
-	var vectorService *service.VectorService
 	var err error
+
+	// Initialize database pool
+	var dbPool *pgxpool.Pool
+	log.Println("Connecting to Postgres database pool (retrying up to 5 times)...")
+	for i := 1; i <= 5; i++ {
+		dbPool, err = pgxpool.New(ctx, cfg.DatabaseURL)
+		if err == nil {
+			err = dbPool.Ping(ctx)
+			if err == nil {
+				break
+			}
+		}
+		log.Printf("[Attempt %d/5] Failed to connect to DB pool: %v. Retrying in 5 seconds...", i, err)
+		time.Sleep(5 * time.Second)
+	}
+
+	if err != nil {
+		log.Fatalf("Fatal: failed to connect to database pool: %v", err)
+	}
+	defer dbPool.Close()
+	log.Println("Database connection pool established!")
+
+	// Retry connecting to Ollama
+	var vectorService *service.VectorService
 
 	log.Println("Initializing services (retrying up to 5 times for database and Ollama ready)...")
 	for i := 1; i <= 5; i++ {
@@ -44,9 +68,19 @@ func main() {
 	}
 	log.Println("Vector Service successfully initialized!")
 
-	pdfService := service.NewPDFService()
+	// Initialize JobService
+	jobService := ingest.NewJobService(dbPool, cfg.OllamaURL, cfg.OllamaVisionModel, vectorService)
+	log.Println("Initializing jobs database schema...")
+	if err := jobService.InitSchema(ctx); err != nil {
+		log.Fatalf("Fatal: failed to initialize jobs schema: %v", err)
+	}
 
-	uploadHandler := handlers.NewUploadHandler(pdfService, vectorService)
+	// Start async worker pool
+	jobService.StartWorkers(2)
+	defer jobService.StopWorkers()
+
+	uploadHandler := handlers.NewUploadHandler(jobService)
+	jobsHandler := handlers.NewJobsHandler(jobService)
 	queryHandler := handlers.NewQueryHandler(vectorService)
 
 	// Setup simple router
@@ -58,9 +92,10 @@ func main() {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 
-	// Upload & Search endpoints
+	// Upload, Search, and Jobs endpoints
 	mux.Handle("/api/upload", uploadHandler)
 	mux.Handle("/api/search", queryHandler)
+	mux.Handle("/api/jobs", jobsHandler)
 
 	// Swagger documentation endpoints
 	mux.HandleFunc("/swagger/doc.json", handlers.SwaggerJSONHandler)
@@ -75,7 +110,7 @@ func main() {
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      handler,
-		ReadTimeout:  120 * time.Second, // PDF processing can take a while
+		ReadTimeout:  120 * time.Second,
 		WriteTimeout: 120 * time.Second,
 	}
 

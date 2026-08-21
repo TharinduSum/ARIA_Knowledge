@@ -7,8 +7,15 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o server cmd/server/main.go
 
 # Run stage
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+FROM debian:bookworm-slim
+# Install runtime system dependencies for PDF processing and OCR
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY --from=builder /app/server .
 EXPOSE 8080
