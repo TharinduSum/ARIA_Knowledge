@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# knowledge-base-accimt
-=======
 # ARIA Knowledge Base
 
 A high-performance document processing and semantic search system built with **Golang**, **LangChain for Go (langchaingo)**, **pgvector**, and **React**. It allows users to upload PDF documents, extract text, split it into chunks, generate embeddings via Ollama, and perform similarity search with an interactive, glassmorphic UI.
@@ -58,21 +55,27 @@ A high-performance document processing and semantic search system built with **G
 If you wish to run the backend and frontend directly on your local machine for development:
 
 #### 1. Run Go Backend
+
 From the project root directory:
+
 ```bash
 cd backend
 # Edit settings in the .env file (pre-configured for you)
 go run cmd/server/main.go
 ```
+
 The server will run on `http://localhost:8080`.
 
 #### 2. Run React Frontend
+
 Open a new terminal window at the project root directory:
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+
 The client will run on `http://localhost:5173`. The UI automatically binds to the local backend.
 
 ---
@@ -89,7 +92,9 @@ The client will run on `http://localhost:5173`. The UI automatically binds to th
 ## 🌐 API Reference
 
 ### 1. Ingestion (`POST /api/upload`)
+
 Accepts a PDF file, parses it, creates overlap chunks, and saves vector embeddings to PostgreSQL.
+
 - **Content-Type**: `multipart/form-data`
 - **Form Values**:
   - `file`: PDF binary file
@@ -97,7 +102,9 @@ Accepts a PDF file, parses it, creates overlap chunks, and saves vector embeddin
   - `chunk_overlap`: Overlap size between chunks (default `150`)
 
 ### 2. Similarity Search (`POST /api/search`)
+
 Performs a cosine similarity search across all indexed chunks.
+
 - **Content-Type**: `application/json`
 - **Request Body**:
   ```json
@@ -122,4 +129,4 @@ Performs a cosine similarity search across all indexed chunks.
     ]
   }
   ```
->>>>>>> 42bab4a (initial commit)
+  > > > > > > > 42bab4a (initial commit)
